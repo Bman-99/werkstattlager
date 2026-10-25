@@ -7,6 +7,7 @@ const multer = require('multer');
 const QRCode = require('qrcode');
 const store = require('./store');
 const vision = require('./vision');
+const links = require('./links');
 const { DATA_DIR } = require('./db');
 
 const PHOTOS = path.join(DATA_DIR, 'photos');
@@ -43,6 +44,22 @@ r.delete('/parts/:id', wrap((req) => ({ ok: store.deletePart(req.params.id) })))
 r.post('/parts/:id/stock', wrap((req) => store.adjustStock(req.params.id, (req.body || {}).delta, (req.body || {}).reason)));
 r.put('/parts/:id/fits/:dim/:fit', wrap((req) => { const b = req.body || {}; return store.setFit(req.params.id, req.params.dim, req.params.fit, b.value, b.material, b.note); }));
 r.delete('/parts/:id/fits/:dim/:fit', wrap((req) => store.setFit(req.params.id, req.params.dim, req.params.fit, null)));
+
+// Bezugsquellen
+const awrap = (fn) => (req, res) => Promise.resolve().then(() => fn(req, res)).then((out) => res.json(out)).catch((e) => res.status(400).json({ error: e.message }));
+r.post('/parts/:id/links', awrap(async (req) => {
+  if (!store.getPart(req.params.id)) throw new Error('Teil nicht gefunden');
+  const b = req.body || {};
+  return store.addLink([+req.params.id], await links.enrich(b, { fetch: b.fetch !== false }))[0];
+}));
+r.patch('/parts/:id/links/:lid', wrap((req) => store.updateLink(req.params.id, req.params.lid, req.body || {})));
+r.post('/parts/:id/links/:lid/refresh', awrap(async (req) => {
+  const p = store.getPart(req.params.id); if (!p) throw new Error('Teil nicht gefunden');
+  const l = p.links.find((x) => x.id === req.params.lid); if (!l) throw new Error('Link nicht gefunden');
+  const n = await links.enrich({ url: l.url });
+  return store.updateLink(p.id, l.id, { title: n.title || l.title, price: n.price || l.price, image: n.image || l.image });
+}));
+r.delete('/parts/:id/links/:lid', wrap((req) => store.removeLink(req.params.id, req.params.lid)));
 
 r.post('/spools', wrap((req) => store.createSpool(req.body || {})));
 r.patch('/spools/:id', wrap((req) => store.updateSpool(req.params.id, req.body || {})));

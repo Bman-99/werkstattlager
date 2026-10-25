@@ -67,4 +67,8 @@ CREATE TABLE IF NOT EXISTS log (
 );
 `);
 
+// Migrationen für bestehende Datenbanken
+const partCols = db.prepare('PRAGMA table_info(parts)').all().map((c) => c.name);
+if (!partCols.includes('links')) db.exec("ALTER TABLE parts ADD COLUMN links TEXT NOT NULL DEFAULT '[]'"); // 1.1.0: Bezugsquellen
+
 module.exports = { db, DATA_DIR };

@@ -1,6 +1,6 @@
 {
   "name": "werkstattlager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Digitales Werkstattlager für Kleinteile und Filament – mit 3D-Druck-Passungen und MCP-Schnittstelle",
   "main": "src/server.js",
   "scripts": {

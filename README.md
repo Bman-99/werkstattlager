@@ -9,6 +9,7 @@ was vorrätig ist und welche Maße ins CAD gehören.
 - 3D-Vorschau jedes Teils, erzeugt aus den Normmaßen
 - Normkatalog: DIN 912, ISO 7380, DIN 7991, DIN 934, DIN 985, DIN 125, Kugellager, Einschmelzmuttern, Magnete, eigene Teile
 - Passungstabelle pro Teil, Messwerte direkt in der Tabelle eintragen
+- Bezugsquellen pro Teil: Link zur Produktseite einfügen, Titel, Preis und Bild werden automatisch gelesen – so bleibt nachvollziehbar, wo ein Teil gekauft wurde
 - Foto-Erfassung: Fotos landen im Eingang und werden von Claude (per MCP) oder optional von einem lokalen Vision-Modell ausgewertet
 - Filamentregal mit Restmengen und AMS-Slots
 - QR-Etiketten pro Organizer (62 × 29 mm), die direkt die passende Ansicht öffnen
@@ -69,12 +70,23 @@ Mit `MCP_TOKEN` zusätzlich `"--header", "Authorization: Bearer <Token>"` anhän
 | `get_fit` | CAD-Werte für eine Passung (press / snap / loose) |
 | `check_parts` | Stückliste gegen den Bestand prüfen |
 | `list_catalog` | Teiletypen und Normgrößen |
-| `add_part` / `update_part` | Teil anlegen (mit automatischer Fachwahl) bzw. ändern |
+| `add_part` / `update_part` | Teil anlegen (mit automatischer Fachwahl) bzw. ändern, optional mit Links |
+| `add_part_link` / `remove_part_link` | Bezugsquelle an ein oder mehrere Teile hängen (z. B. Sortimentbox) bzw. entfernen |
 | `adjust_stock` | Bestand buchen (z. B. nach einem Projekt) |
 | `record_fit_measurement` | gemessenen Passungswert speichern |
 | `list_containers` | Organizer mit Fächern und Belegung |
 | `list_spools` / `update_spool` | Filament |
 | `list_intake` / `get_intake_photo` / `resolve_intake` | Fotos aus dem Eingang ansehen und als Teil anlegen |
+
+## Bezugsquellen
+
+Jedes Teil kann beliebig viele Links zu Produktseiten haben. In der Oberfläche den Link ins Feld unter „Bezugsquellen“ einfügen –
+der Server liest Titel, Preis und Vorschaubild von der Seite (Open Graph / JSON-LD). Amazon- und AliExpress-Links werden auf die
+Produkt-URL gekürzt, Kurzlinks (`amzn.eu/d/…`) aufgelöst und Tracking-Parameter entfernt. Manche Shops liefern keine Daten an
+Server aus; dann bleibt der Link erhalten und Titel/Preis lassen sich von Hand ergänzen.
+
+Per MCP erscheinen die Links in `get_part` und `search_parts` (Feld `links`), die Freitextsuche findet auch Shopnamen.
+Mit `add_part_link` hängt Claude einen Link an mehrere Teile auf einmal, z. B. das Sortiment an alle enthaltenen Schrauben.
 
 ## Passungen
 
@@ -104,5 +116,8 @@ Aufbau: `src/` Server (Express, SQLite, MCP), `public/` Oberfläche ohne Build-S
 
 ## Changelog
 
+- **1.1.0** (2026-10-25): Bezugsquellen – Links zu Produktseiten pro Teil mit automatisch gelesenem Titel, Preis und Bild,
+  bearbeiten und neu einlesen in der Oberfläche; MCP-Tools `add_part_link` und `remove_part_link`, Links in `get_part`/`search_parts`
+  und als Option bei `add_part`, `update_part`, `resolve_intake`. Bestehende Datenbanken werden beim Start automatisch erweitert.
 - **1.0.0** (2026-10-25): Erste Version – Organizer (Mini-Systainer, Tanos, Raster), Normkatalog, Passungen mit Messwerten,
   Foto-Eingang, Filament, QR-Etiketten, MCP-Schnittstelle, Docker-Image.

@@ -1,6 +1,7 @@
 'use strict';
 const { db } = require('./db');
 const C = require('../public/shared/catalog.js');
+const links = require('./links');
 
 // ---------- Organizer-Layouts ----------
 function miniLayout() {
@@ -87,7 +88,7 @@ function freeCells(containerId) {
 // ---------- Teile ----------
 function rowToPart(r) {
   return r && { id: r.id, type: r.type, params: JSON.parse(r.params), name: r.name, finish: r.finish, stock: r.stock, min_stock: r.min_stock,
-    note: r.note, container_id: r.container_id, cell: r.cell, fits: JSON.parse(r.fits || '{}'), created: r.created, updated: r.updated };
+    note: r.note, container_id: r.container_id, cell: r.cell, fits: JSON.parse(r.fits || '{}'), links: JSON.parse(r.links || '[]'), created: r.created, updated: r.updated };
 }
 function locationOf(p, contMap) {
   if (!p.container_id) return null;
@@ -159,6 +160,7 @@ function createPart(spec) {
   const r = db.prepare('INSERT INTO parts (type, params, name, finish, stock, min_stock, note, container_id, cell) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(type, JSON.stringify(params), spec.name || null, spec.finish || null, Math.max(0, parseInt(spec.stock, 10) || 0), Math.max(0, parseInt(spec.min_stock, 10) || 0), spec.note || null, loc.container_id, loc.cell);
   if (spec.stock) logStock(r.lastInsertRowid, +spec.stock, 'angelegt');
+  if (Array.isArray(spec.links) && spec.links.length) setLinks(r.lastInsertRowid, spec.links);
   return getPart(r.lastInsertRowid);
 }
 
@@ -173,6 +175,46 @@ function updatePart(id, patch) {
   db.prepare(`UPDATE parts SET params = ?, name = ?, finish = ?, stock = ?, min_stock = ?, note = ?, container_id = ?, cell = ?, updated = datetime('now') WHERE id = ?`)
     .run(JSON.stringify(params), 'name' in patch ? (patch.name || null) : p.name, 'finish' in patch ? (patch.finish || null) : p.finish, stock,
       patch.min_stock != null ? Math.max(0, parseInt(patch.min_stock, 10) || 0) : p.min_stock, 'note' in patch ? (patch.note || null) : p.note, loc.container_id, loc.cell, p.id);
+  if (Array.isArray(patch.links)) setLinks(p.id, patch.links);
+  return getPart(p.id);
+}
+
+// ---------- Bezugsquellen ----------
+function saveLinks(id, list) { db.prepare(`UPDATE parts SET links = ?, updated = datetime('now') WHERE id = ?`).run(JSON.stringify(list), +id); }
+// Ersetzt alle Links eines Teils (gleiche URL nur einmal)
+function setLinks(id, list) {
+  const p = getPartRaw(id); if (!p) throw new Error('Teil nicht gefunden');
+  const out = [];
+  list.forEach((l) => { const n = links.normalize(l); const old = p.links.find((x) => x.url === n.url); if (old) { n.id = old.id; n.added = old.added; } if (!out.some((x) => x.url === n.url)) out.push(n); });
+  saveLinks(p.id, out);
+  return getPart(p.id);
+}
+// Hängt einen Link an ein oder mehrere Teile; gibt es die URL schon, werden nur neue Angaben übernommen
+function addLink(ids, link) {
+  const n = links.normalize(link);
+  return ids.map((id) => {
+    const p = getPartRaw(id); if (!p) throw new Error('Teil #' + id + ' nicht gefunden');
+    const old = p.links.find((x) => x.url === n.url);
+    if (old) ['title', 'price', 'image', 'note', 'shop'].forEach((k) => { if (n[k] && (link[k] || !old[k])) old[k] = n[k]; });
+    else p.links.push(Object.assign({}, n, { id: ids.length > 1 ? links.normalize({ url: n.url }).id : n.id }));
+    saveLinks(p.id, p.links);
+    return getPart(p.id);
+  });
+}
+function updateLink(id, linkId, patch) {
+  const p = getPartRaw(id); if (!p) throw new Error('Teil nicht gefunden');
+  const l = p.links.find((x) => x.id === linkId); if (!l) throw new Error('Link nicht gefunden');
+  ['title', 'price', 'note', 'shop'].forEach((k) => { if (k in patch) l[k] = patch[k] == null || patch[k] === '' ? (k === 'shop' ? links.shopName(l.url) : null) : String(patch[k]).trim().slice(0, k === 'note' ? 300 : 200); });
+  if ('image' in patch) l.image = patch.image && /^https?:\/\//i.test(patch.image) ? String(patch.image).slice(0, 1000) : null;
+  if (patch.url) { const c = links.canonical(patch.url); if (p.links.some((x) => x !== l && x.url === c)) throw new Error('Diesen Link gibt es bei dem Teil schon'); l.url = c; }
+  saveLinks(p.id, p.links);
+  return getPart(p.id);
+}
+function removeLink(id, linkId) {
+  const p = getPartRaw(id); if (!p) throw new Error('Teil nicht gefunden');
+  const next = p.links.filter((x) => x.id !== linkId && x.url !== linkId);
+  if (next.length === p.links.length) throw new Error('Link nicht gefunden');
+  saveLinks(p.id, next);
   return getPart(p.id);
 }
 
@@ -203,7 +245,7 @@ function setFit(id, dimKey, fit, value, material, note) {
 
 // ---------- Suche ----------
 function norm(s) { return String(s || '').toLowerCase().replace(/×/g, 'x').replace(/,/g, '.'); }
-function haystack(p) { const i = p.info; return norm([i.name, i.size, i.norm, i.typeLabel, i.group, i.mat, i.dims, p.note, p.type, p.location && p.location.text].join(' ')); }
+function haystack(p) { const i = p.info; return norm([i.name, i.size, i.norm, i.typeLabel, i.group, i.mat, i.dims, p.note, p.type, p.location && p.location.text, (p.links || []).map((l) => [l.shop, l.title].join(' ')).join(' ')].join(' ')); }
 function searchParts({ query, type, thread, min_length, max_length, in_stock, container_id } = {}) {
   const toks = norm(query).trim().split(/\s+/).filter(Boolean);
   const th = thread != null ? C.threadOf(/^M/i.test(String(thread)) ? thread : 'M' + thread) : null;
@@ -272,7 +314,7 @@ function seedIfEmpty() {
 
 module.exports = {
   KINDS, cellLabel, listContainers, getContainer, createContainer, updateContainer, deleteContainer, freeCells,
-  listParts, getPart, createPart, updatePart, deletePart, adjustStock, partLog, setFit, searchParts, resolveParams,
+  listParts, getPart, createPart, updatePart, deletePart, setLinks, addLink, updateLink, removeLink, adjustStock, partLog, setFit, searchParts, resolveParams,
   listSpools, getSpool, createSpool, updateSpool, deleteSpool,
   listIntake, getIntake, createIntake, updateIntake, state, seedIfEmpty
 };

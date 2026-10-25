@@ -4,7 +4,7 @@
   var app = document.getElementById('app');
   var S = {
     data: null, view: 'lager', cont: null, sel: null, fit: 'snap', q: '', showRes: false,
-    panel: null, form: null, editForm: null, contForm: null, fitEdit: null, spool: null, spoolForm: null,
+    panel: null, form: null, editForm: null, contForm: null, fitEdit: null, spool: null, spoolForm: null, linkUrl: '', linkBusy: false, linkEdit: null,
     yaw: 0.6, pitch: -0.5, spin: true, viewers: []
   };
   var FITS = [['press', 'Press'], ['snap', 'Snap-Fit'], ['loose', 'Lose']];
@@ -166,9 +166,51 @@
       '<div class="legend"><span>' + (anyMeas ? 'Grüner Punkt = gemessen' : 'Startwerte · noch nicht gemessen') + '</span><span>Wert antippen zum Eintragen</span></div>' +
       '<div class="fits">' + table + '</div>' + fe +
       '<div class="summary"><b>Im CAD für ' + fitName + '</b><span>' + (sum.length ? sum.join(' · ') : 'Für dieses Teil gibt es nur einen Presswert.') + '</span></div></div>' +
+      linksBlock(p) +
       '<div class="mcp"><span class="c">MCP · so frage ich bei der Konstruktion ab</span><span>get_fit(id: ' + p.id + ', fit: "' + S.fit + '")</span><span class="r">→ ' + esc(first ? first.short + ' ' + fmt(first.values[S.fit]) + ' mm' : '—') + '</span></div>' +
       '<div class="row"><button type="button" class="btn" data-act="editpart">' + ic('edit', 16) + 'Bearbeiten / verschieben</button><button type="button" class="btn danger" data-act="delpart">' + ic('trash', 16) + 'Löschen</button></div>' +
       '</div></div>';
+  }
+
+  // ---------- Bezugsquellen ----------
+  function shortUrl(u) { try { var x = new URL(u); return x.hostname.replace(/^www\./, '') + x.pathname.replace(/\/$/, ''); } catch (e) { return u; } }
+  function dateDe(d) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? m[3] + '.' + m[2] + '.' + m[1] : d; }
+  function linksBlock(p) {
+    var ls = p.links || [];
+    var items = ls.map(function (l) {
+      var e = S.linkEdit;
+      if (e && e.pid === p.id && e.lid === l.id) {
+        return '<div class="fitedit"><b style="font-size:14px">' + esc(l.shop) + ' · Link bearbeiten</b><div class="form">' +
+          '<div class="field full"><label for="le-t">Titel</label><input id="le-t" data-le="title" value="' + esc(e.title) + '" placeholder="' + esc(shortUrl(l.url)) + '"></div>' +
+          '<div class="field"><label for="le-p">Preis</label><input id="le-p" data-le="price" value="' + esc(e.price) + '" placeholder="z. B. 12,99 €"></div>' +
+          '<div class="field"><label for="le-s">Shop</label><input id="le-s" data-le="shop" value="' + esc(e.shop) + '"></div>' +
+          '<div class="field full"><label for="le-u">Link</label><input id="le-u" type="url" data-le="url" value="' + esc(e.url) + '"></div>' +
+          '<div class="field full"><label for="le-n">Notiz</label><input id="le-n" data-le="note" value="' + esc(e.note) + '" placeholder="z. B. Sortiment 720 Stk, bestellt 10/2026"></div></div>' +
+          '<div class="row"><button type="button" class="btn dark small" data-act="linksave">Speichern</button><button type="button" class="btn small" data-act="linkrefresh">Titel & Preis neu einlesen</button>' +
+          '<button type="button" class="btn small" data-act="linkcancel">Abbrechen</button><button type="button" class="btn small danger" data-act="linkdel" data-lid="' + esc(l.id) + '">' + ic('trash', 14) + 'Entfernen</button></div></div>';
+      }
+      var meta = [l.shop, l.price, l.added ? 'seit ' + dateDe(l.added) : null].filter(Boolean).join(' · ');
+      return '<div class="plink"><span class="thumbbox" aria-hidden="true">' + esc((l.shop || '?').charAt(0).toUpperCase()) +
+        (l.image ? '<img src="' + esc(l.image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' : '') + '</span>' +
+        '<a class="lt" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer"><b>' + esc(l.title || shortUrl(l.url)) + '</b><span class="note">' + esc(meta) + '</span>' +
+        (l.note ? '<span class="note">' + esc(l.note) + '</span>' : '') + '</a>' +
+        '<button type="button" class="iconbtn" data-act="linkedit" data-lid="' + esc(l.id) + '" aria-label="' + esc('Link bei ' + l.shop + ' bearbeiten') + '">' + ic('edit', 16) + '</button></div>';
+    }).join('');
+    return '<div class="stack" style="gap:10px"><div class="between"><h2>Bezugsquellen</h2><span class="note">' + (ls.length ? ls.length + (ls.length === 1 ? ' Link' : ' Links') : 'Wo gekauft?') + '</span></div>' + items +
+      '<div class="linkadd"><label for="l-url" class="sr">Link zur Produktseite</label><input id="l-url" type="url" inputmode="url" autocomplete="off" placeholder="Link einfügen – Amazon, AliExpress, Shop …" value="' + esc(S.linkUrl) + '"' + (S.linkBusy ? ' disabled' : '') + '>' +
+      '<button type="button" class="btn dark small" data-act="linkadd"' + (S.linkBusy ? ' disabled' : '') + '>' + (S.linkBusy ? 'Lese Seite …' : ic('plus', 14) + 'Hinzufügen') + '</button></div>' +
+      (ls.length ? '' : '<p class="note">Titel, Preis und Bild werden von der Produktseite gelesen. Claude sieht die Links per MCP und kann sie beim Nachkaufen nennen.</p>') + '</div>';
+  }
+  function addLinkNow() {
+    var u = (S.linkUrl || '').trim(), pid = S.sel; if (!u) { toast('Bitte einen Link einfügen'); return; }
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    S.linkBusy = true; render();
+    api('POST', '/parts/' + pid + '/links', { url: u }).then(function (np) {
+      S.linkBusy = false; S.linkUrl = '';
+      var l = (np.links || [])[(np.links || []).length - 1];
+      toast(l && !l.title ? 'Link gespeichert – Titel ließ sich nicht lesen, bei Bedarf über ✎ ergänzen' : 'Link gespeichert');
+      return load();
+    }).catch(function (e) { S.linkBusy = false; render(); fail(e); });
   }
 
   function overviewCard() {
@@ -340,7 +382,7 @@
   requestAnimationFrame(tick);
 
   // ---------- Aktionen ----------
-  function select(id) { var p = byId(id); if (!p) return; S.sel = p.id; S.panel = null; S.fitEdit = null; S.view = 'lager'; if (p.container_id) S.cont = p.container_id; setHash('#/p/' + p.id); render(); if (window.innerWidth < 1050) { var r = app.querySelector('.right'); if (r) r.scrollIntoView({ behavior: 'smooth' }); } }
+  function select(id) { var p = byId(id); if (!p) return; if (S.sel !== p.id) { S.linkUrl = ''; S.linkEdit = null; } S.sel = p.id; S.panel = null; S.fitEdit = null; S.view = 'lager'; if (p.container_id) S.cont = p.container_id; setHash('#/p/' + p.id); render(); if (window.innerWidth < 1050) { var r = app.querySelector('.right'); if (r) r.scrollIntoView({ behavior: 'smooth' }); } }
   function openAdd(mode, extra) { S.panel = 'add'; S.form = newForm(mode, extra); if (S.view === 'filament') S.view = 'lager'; render(); }
   function partBody(f) {
     var b = { type: f.type, stock: parseInt(f.stock, 10) || 0, min_stock: parseInt(f.min_stock, 10) || 0, finish: f.finish || undefined, note: f.note || undefined, container_id: f.cell != null ? f.container_id : undefined, cell: f.cell != null ? f.cell : undefined };
@@ -456,6 +498,12 @@
         if (it.suggestion) applySuggestion(S.form, it.suggestion);
         render(); break;
       }
+      case 'linkadd': addLinkNow(); break;
+      case 'linkedit': { var lp = byId(S.sel), ll = lp.links.filter(function (x) { return x.id === ds.lid; })[0]; S.linkEdit = { pid: lp.id, lid: ll.id, title: ll.title || '', price: ll.price || '', shop: ll.shop || '', url: ll.url, note: ll.note || '' }; render(); var lt = document.getElementById('le-t'); if (lt) lt.focus(); break; }
+      case 'linkcancel': S.linkEdit = null; render(); break;
+      case 'linksave': { var le = S.linkEdit; api('PATCH', '/parts/' + le.pid + '/links/' + le.lid, { title: le.title, price: le.price, shop: le.shop, note: le.note, url: le.url }).then(function () { S.linkEdit = null; toast('Link gespeichert'); return load(); }).catch(fail); break; }
+      case 'linkrefresh': { var lr = S.linkEdit; b.disabled = true; b.textContent = 'Lese Seite …'; api('POST', '/parts/' + lr.pid + '/links/' + lr.lid + '/refresh').then(function (np) { var nl = np.links.filter(function (x) { return x.id === lr.lid; })[0]; if (nl) { lr.title = nl.title || ''; lr.price = nl.price || ''; } toast(nl && nl.title ? 'Neu eingelesen' : 'Der Shop gibt keine Daten heraus – bitte von Hand eintragen'); return load(); }).catch(function (e2) { b.disabled = false; fail(e2); }); break; }
+      case 'linkdel': { var ld = S.linkEdit; api('DELETE', '/parts/' + ld.pid + '/links/' + ds.lid).then(function () { S.linkEdit = null; toast('Link entfernt'); return load(); }).catch(fail); break; }
       case 'intakedel': api('POST', '/intake/' + ds.id + '/dismiss').then(load).catch(fail); break;
     }
   });
@@ -463,6 +511,8 @@
   document.addEventListener('input', function (e) {
     var t = e.target, ds = t.dataset, soft = ds.rerender === 'soft';
     if (t.id === 'q') { S.q = t.value; S.showRes = true; render(); return; }
+    if (t.id === 'l-url') { S.linkUrl = t.value; return; }
+    if (ds.le && S.linkEdit) { S.linkEdit[ds.le] = t.value; return; }
     if (ds.f && S.form) { S.form[ds.f] = t.value; if (soft) render(); return; }
     if (ds.dim != null && S.form) { S.form.dims[+ds.dim][ds.k] = t.value; return; }
     if (ds.fe && S.fitEdit) { S.fitEdit[ds.fe] = t.value; return; }
@@ -486,6 +536,8 @@
   document.addEventListener('keydown', function (e) {
     if (e.target.id === 'q' && e.key === 'Escape') { S.showRes = false; render(); }
     if (e.target.id === 'q' && e.key === 'Enter') { var t = toks(), r = S.data.parts.filter(function (p) { return isMatch(p, t); }); if (r[0]) { S.showRes = false; select(r[0].id); } }
+    if (e.target.id === 'l-url' && e.key === 'Enter') { e.preventDefault(); addLinkNow(); }
+    if (S.linkEdit && e.key === 'Enter' && e.target.dataset && e.target.dataset.le) { var ls2 = document.querySelector('[data-act="linksave"]'); if (ls2) ls2.click(); }
     if (S.fitEdit && e.key === 'Enter' && e.target.dataset && e.target.dataset.fe) { var sv = document.querySelector('[data-act="fitsave"]'); if (sv) sv.click(); }
   });
   document.addEventListener('focusin', function (e) { if (e.target.id === 'q' && S.q && !S.showRes) { S.showRes = true; render(); } });
@@ -499,6 +551,12 @@
   document.addEventListener('dragleave', function (e) { var d = e.target.closest && e.target.closest('#drop'); if (d) d.classList.remove('over'); });
   document.addEventListener('drop', function (e) { var d = e.target.closest && e.target.closest('#drop'); if (d) { e.preventDefault(); uploadPhoto(e.dataTransfer.files[0]); } });
   // Foto aus der Zwischenablage
+  // Link einfügen = direkt speichern, wenn das Feld leer war
+  document.addEventListener('paste', function (e) {
+    if (e.target.id !== 'l-url' || e.target.value.trim()) return;
+    var txt = (e.clipboardData && e.clipboardData.getData('text') || '').trim();
+    if (/^https?:\/\/\S+$/i.test(txt)) { e.preventDefault(); S.linkUrl = txt; addLinkNow(); }
+  });
   document.addEventListener('paste', function (e) { if (S.panel !== 'add' || !S.form || S.form.mode !== 'photo') return; var it = [].slice.call(e.clipboardData.items || []).filter(function (x) { return x.type.indexOf('image/') === 0; })[0]; if (it) uploadPhoto(it.getAsFile()); });
   window.addEventListener('hashchange', function () { if (S.data) { route(); render(); } });
 

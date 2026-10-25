@@ -7,18 +7,23 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const C = require('../public/shared/catalog.js');
 const store = require('./store');
+const links = require('./links');
 const { DATA_DIR } = require('./db');
 
 let sharp = null; try { sharp = require('sharp'); } catch (e) { /* optional */ }
 
 const TYPE_ENUM = Object.keys(C.TYPES);
 const FIT_ENUM = ['press', 'snap', 'loose'];
+const LINK = z.union([z.string(), z.object({ url: z.string(), title: z.string().optional(), price: z.string().optional(), note: z.string().optional() })]);
+const LINKS = z.array(LINK).optional().describe('Purchase links (product pages). Strings or {url, title?, price?, note?}. Title/price/image are read from the page when missing.');
+const enrichAll = (list) => Promise.all((list || []).map((l) => links.enrich(l)));
 
 const INSTRUCTIONS = `Werkstattlager: digitales Lager für Kleinteile (Schrauben, Muttern, Scheiben, Kugellager, Einschmelzmuttern, Magnete) und Filament.
 Alle Maße in mm. Jedes Teil hat Normmaße und pro Maß 3D-Druck-Passungen: press (Presssitz), snap (Snap-Fit/leichte Klemmung), loose (lose).
 Die Passungswerte sind bereits die Werte, die direkt ins CAD gehören (z. B. Bohrung für einen Lagersitz). "measured" markiert am Drucker gemessene Werte; sonst sind es Startwerte.
 Vor dem Konstruieren: mit search_parts prüfen, was vorrätig ist, und vorhandene Teile bevorzugen. Nach einem Projekt verbrauchte Teile mit adjust_stock abbuchen (nur nach Bestätigung durch den Nutzer).
-Fotos im Eingang (list_intake / get_intake_photo) auswerten und mit resolve_intake anlegen.`;
+Fotos im Eingang (list_intake / get_intake_photo) auswerten und mit resolve_intake anlegen.
+Bezugsquellen: Jedes Teil hat "links" mit Produktseiten, wo es gekauft wurde (Shop, Titel, Preis). Zum Nachkaufen diese Links nennen. Neue Links mit add_part_link anhängen – bei Sortimenten einen Link an alle enthaltenen Teile (ids).`;
 
 function compact(p) {
   const fits = {};
@@ -27,18 +32,19 @@ function compact(p) {
     const meas = Object.keys(r.measured); if (meas.length) fits[r.key].measured = meas;
   });
   return { id: p.id, name: p.info.name, size: p.info.size, type: p.type, norm: p.info.norm, material: p.info.mat, stock: p.stock, min_stock: p.min_stock, low_stock: p.low,
-    location: p.location ? p.location.text : null, dimensions: p.params, fits, note: p.note || undefined };
+    location: p.location ? p.location.text : null, dimensions: p.params, fits, note: p.note || undefined,
+    links: (p.links || []).map((l) => ({ link_id: l.id, url: l.url, shop: l.shop, title: l.title || undefined, price: l.price || undefined, note: l.note || undefined, added: l.added })) };
 }
 const ok = (data) => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 1) }] });
 const fail = (e) => ({ isError: true, content: [{ type: 'text', text: 'Fehler: ' + (e && e.message ? e.message : String(e)) }] });
 const safe = (fn) => async (args) => { try { return await fn(args || {}); } catch (e) { return fail(e); } };
 
 function buildServer() {
-  const s = new McpServer({ name: 'werkstattlager', version: '1.0.0' }, { instructions: INSTRUCTIONS });
+  const s = new McpServer({ name: 'werkstattlager', version: require('../package.json').version }, { instructions: INSTRUCTIONS });
 
   s.registerTool('search_parts', {
     title: 'Teile suchen',
-    description: 'Search the parts inventory. All filters optional and combined with AND. Returns stock, location, dimensions and 3D-print fit values per dimension.',
+    description: 'Search the parts inventory. All filters optional and combined with AND. Free text also matches shop names and titles of purchase links. Returns stock, location, dimensions, 3D-print fit values per dimension and purchase links.',
     inputSchema: {
       query: z.string().optional().describe('Free text, e.g. "M3 zylinder", "608", "magnet 6"'),
       type: z.enum(TYPE_ENUM).optional().describe('shcs=DIN 912, button=ISO 7380, csk=DIN 7991, nut, nyloc, washer, insert, bearing, magnet, custom'),
@@ -52,7 +58,7 @@ function buildServer() {
 
   s.registerTool('get_part', {
     title: 'Teil abrufen',
-    description: 'Full details of one part: dimensions, fit table (press/snap/loose per dimension, marking measured values), location and recent stock changes.',
+    description: 'Full details of one part: dimensions, fit table (press/snap/loose per dimension, marking measured values), location, purchase links and recent stock changes.',
     inputSchema: { id: z.number().int() }
   }, safe((a) => { const p = store.getPart(a.id); if (!p) throw new Error('Teil nicht gefunden'); return ok(Object.assign(compact(p), { recent_changes: store.partLog(p.id, 10) })); }));
 
@@ -94,16 +100,34 @@ function buildServer() {
       type: z.enum(TYPE_ENUM), size: z.string().optional(), length: z.number().optional(),
       params: z.record(z.string(), z.any()).optional().describe('Dimension overrides, e.g. {"hole":4.1}. For custom: {"title":"…","dims":[{"label":"Breite","value":12,"kind":"hole|shaft|depth"}]}'),
       name: z.string().optional(), finish: z.enum(Object.keys(C.FINISH)).optional(), stock: z.number().int().min(0).default(0), min_stock: z.number().int().min(0).optional(),
-      container_id: z.string().optional(), cell: z.string().optional(), auto_place: z.boolean().optional(), note: z.string().optional()
+      container_id: z.string().optional(), cell: z.string().optional(), auto_place: z.boolean().optional(), note: z.string().optional(), links: LINKS
     }
-  }, safe((a) => ok(compact(store.createPart(a)))));
+  }, safe(async (a) => { if (a.links) a.links = await enrichAll(a.links); return ok(compact(store.createPart(a))); }));
 
   s.registerTool('update_part', {
     title: 'Teil ändern',
     description: 'Change name, finish, min stock, note, dimensions or location (container_id + cell) of a part. Set container_id to null to remove it from its bin.',
     inputSchema: { id: z.number().int(), name: z.string().optional(), finish: z.enum(Object.keys(C.FINISH)).optional(), min_stock: z.number().int().min(0).optional(), note: z.string().optional(),
-      params: z.record(z.string(), z.any()).optional(), container_id: z.string().nullable().optional(), cell: z.string().optional() }
-  }, safe((a) => { const id = a.id; delete a.id; return ok(compact(store.updatePart(id, a))); }));
+      params: z.record(z.string(), z.any()).optional(), container_id: z.string().nullable().optional(), cell: z.string().optional(),
+      links: LINKS.describe('Replaces ALL links of the part. To add one link use add_part_link instead.') }
+  }, safe(async (a) => { const id = a.id; delete a.id; if (a.links) a.links = await enrichAll(a.links); return ok(compact(store.updatePart(id, a))); }));
+
+  s.registerTool('add_part_link', {
+    title: 'Bezugsquelle anhängen',
+    description: 'Attach a purchase link (product page) to one or more parts, e.g. the shop page of an assortment box to all parts it contains. Shop name, title, price and image are read from the page when not given; Amazon/AliExpress links are shortened and tracking parameters removed. An existing identical link is updated instead of duplicated.',
+    inputSchema: { ids: z.array(z.number().int()).min(1).describe('Part ids'), url: z.string(), title: z.string().optional(), price: z.string().optional().describe('e.g. "12,99 €" or "12,99 € / 720 Stk"'),
+      note: z.string().optional().describe('e.g. "Sortiment 720 Stk, bestellt 10/2026"'), fetch_metadata: z.boolean().default(true) }
+  }, safe(async (a) => {
+    const l = await links.enrich({ url: a.url, title: a.title, price: a.price, note: a.note }, { fetch: a.fetch_metadata !== false });
+    const parts = store.addLink(a.ids, l);
+    return ok({ link: { url: l.url, shop: l.shop, title: l.title, price: l.price, image: l.image }, parts: parts.map((p) => ({ id: p.id, name: p.info.name, links: p.links.length })) });
+  }));
+
+  s.registerTool('remove_part_link', {
+    title: 'Bezugsquelle entfernen',
+    description: 'Remove a purchase link from a part (link_id from get_part, or the exact url).',
+    inputSchema: { id: z.number().int(), link_id: z.string() }
+  }, safe((a) => ok(compact(store.removeLink(a.id, a.link_id)))));
 
   s.registerTool('adjust_stock', {
     title: 'Bestand buchen',
@@ -168,9 +192,10 @@ function buildServer() {
     inputSchema: {
       id: z.number().int(), type: z.enum(TYPE_ENUM), size: z.string().optional(), length: z.number().optional(), params: z.record(z.string(), z.any()).optional(),
       name: z.string().optional(), finish: z.enum(Object.keys(C.FINISH)).optional(), stock: z.number().int().min(0).default(0), min_stock: z.number().int().min(0).optional(),
-      container_id: z.string().optional(), cell: z.string().optional(), auto_place: z.boolean().optional(), note: z.string().optional()
+      container_id: z.string().optional(), cell: z.string().optional(), auto_place: z.boolean().optional(), note: z.string().optional(), links: LINKS
     }
-  }, safe((a) => {
+  }, safe(async (a) => {
+    if (a.links) a.links = await enrichAll(a.links);
     const it = store.getIntake(a.id); if (!it) throw new Error('Foto nicht gefunden');
     const spec = Object.assign({}, a); delete spec.id;
     const p = store.createPart(spec);
