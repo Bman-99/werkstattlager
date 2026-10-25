@@ -1,0 +1,24 @@
+{
+  "name": "werkstattlager",
+  "version": "1.0.0",
+  "description": "Digitales Werkstattlager für Kleinteile und Filament – mit 3D-Druck-Passungen und MCP-Schnittstelle",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "SEED_DEMO=1 DATA_DIR=./data-dev node src/server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "better-sqlite3": "^13.0.3",
+    "express": "^4.22.3",
+    "multer": "^2.5.0",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}

@@ -1,0 +1,20 @@
+services:
+  werkstattlager:
+    image: ghcr.io/bman-99/werkstattlager:latest
+    build: .
+    container_name: werkstattlager
+    restart: unless-stopped
+    ports:
+      - "8420:8420"
+    environment:
+      # Adresse, unter der die App erreichbar ist (für die QR-Etiketten), z. B. per Tailscale-MagicDNS
+      PUBLIC_URL: "http://heimserver:8420"
+      # Optional: Token für die MCP-Schnittstelle (Header "Authorization: Bearer <Token>")
+      MCP_TOKEN: ""
+      # Optional: automatische Foto-Erkennung über ein OpenAI-kompatibles Vision-Modell (z. B. Ollama)
+      VISION_URL: ""
+      VISION_MODEL: "qwen2.5vl:7b"
+      # Beispieldaten zum Ausprobieren (nur wenn noch keine Teile existieren)
+      SEED_DEMO: "0"
+    volumes:
+      - ./data:/data
