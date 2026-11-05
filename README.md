@@ -37,6 +37,7 @@ Zum Ausprobieren mit Beispieldaten `SEED_DEMO: "1"` setzen (wirkt nur, solange n
 | `MCP_TOKEN` | optional: verlangt `Authorization: Bearer <Token>` an `/mcp` |
 | `VISION_URL` | optional: OpenAI-kompatibler Endpunkt für die Foto-Erkennung, z. B. `http://ollama:11434/v1` |
 | `VISION_MODEL` | Modell dafür, Standard `qwen2.5vl:7b` |
+| `VISION_REASONING` | optional: `reasoning_effort` für Denk-Modelle, z. B. `none` (Gemma 4 über Ollama) |
 | `VISION_API_KEY` | optional, falls der Endpunkt einen Schlüssel braucht |
 | `SEED_DEMO` | `1` = Beispieldaten anlegen |
 

@@ -30,6 +30,9 @@ async function analyze(intake) {
       headers: Object.assign({ 'Content-Type': 'application/json' }, KEY ? { Authorization: 'Bearer ' + KEY } : {}),
       body: JSON.stringify({
         model: MODEL, temperature: 0.1,
+        // Denk-Modelle (z. B. Gemma 4 über Ollama) sonst erst lange "nachdenken" lassen:
+        // VISION_REASONING=none schaltet das ab (OpenAI-kompatibles Feld reasoning_effort).
+        ...(process.env.VISION_REASONING ? { reasoning_effort: process.env.VISION_REASONING } : {}),
         messages: [{ role: 'user', content: [{ type: 'text', text: PROMPT }, { type: 'image_url', image_url: { url: `data:${intake.mime};base64,${b64}` } }] }]
       }),
       signal: AbortSignal.timeout(120000)
